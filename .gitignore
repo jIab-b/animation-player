@@ -1,1 +1,3 @@
 animate_*/*
+__pycache__/*
+pixel sprites.safetensors
