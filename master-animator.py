@@ -21,19 +21,10 @@ def main():
         "--lora",
         type=str,
         action='append', # Allows specifying multiple LoRAs
-        help="Path to LoRA file (.safetensors) or directory containing a LoRA. "
-             "If a directory, also specify --lora_weight_name. "
-             "Can be used multiple times for multiple LoRAs. "
-             "Example: --lora ./pixel_sprites.safetensors "
-             "Example: --lora ./lora_dir --lora_weight_name model.safetensors"
+        help="Path to LoRA file (.safetensors). Can be used multiple times for multiple LoRAs. "
+             "Example: --lora ./pixel_sprites.safetensors"
     )
-    parser.add_argument(
-        "--lora_weight_name",
-        type=str,
-        action='append',
-        help="The specific filename of the LoRA weight within the directory specified by a corresponding --lora. "
-             "Only used if --lora points to a directory. Must be paired with a --lora argument."
-    )
+    # Removed --lora_weight_name argument
     parser.add_argument(
         "--prompt",
         type=str,
@@ -82,39 +73,44 @@ def main():
         default=10,
         help="Frames per second for the output animation player. Default is 10."
     )
+    # SDXL-Lightning specific arguments
+    parser.add_argument(
+        "--sdxl_lightning_unet_repo_id",
+        type=str,
+        default=None,
+        help="Hugging Face Repo ID for the SDXL-Lightning UNet (e.g., 'ByteDance/SDXL-Lightning')."
+    )
+    parser.add_argument(
+        "--sdxl_lightning_unet_ckpt",
+        type=str,
+        default=None,
+        help="Checkpoint filename for the SDXL-Lightning UNet (e.g., 'sdxl_lightning_4step_unet.safetensors')."
+    )
+    parser.add_argument(
+        "--sdxl_variant",
+        type=str,
+        default=None, # Will default to fp16 in pipeline.py if on cuda and SDXL
+        help="Variant for SDXL pipeline (e.g., 'fp16')."
+    )
+    parser.add_argument(
+        "--scheduler_timestep_spacing",
+        type=str,
+        default=None, # Will default to 'trailing' in pipeline.py for SDXL-Lightning
+        help="Scheduler timestep spacing (e.g., 'trailing', 'leading', 'linspace')."
+    )
 
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    lora_details_list = []
-    if args.lora:
-        if args.lora_weight_name and len(args.lora) != len(args.lora_weight_name):
-            print("Warning: Mismatch between number of --lora and --lora_weight_name arguments. "
-                  "Ensure each --lora_weight_name corresponds to a --lora that is a directory.")
-            # Attempt to pair them as best as possible, or handle error more gracefully
-        
-        for i, lora_path_arg in enumerate(args.lora):
-            detail = {}
-            if os.path.isdir(lora_path_arg):
-                # If --lora is a directory, a corresponding --lora_weight_name should exist
-                if args.lora_weight_name and i < len(args.lora_weight_name):
-                    detail['path'] = lora_path_arg # Directory
-                    detail['weight_name'] = args.lora_weight_name[i] # Filename
-                else:
-                    print(f"Warning: --lora '{lora_path_arg}' is a directory, but no corresponding --lora_weight_name provided or index out of bounds. Skipping this LoRA.")
-                    continue
-            else:
-                # If --lora is a file, path is the full file path, weight_name is not strictly needed by initialize_diffusion_pipeline
-                detail['path'] = lora_path_arg # Full path to .safetensors
-                detail['weight_name'] = None # Or os.path.basename(lora_path_arg) - pipeline.py handles this
-            lora_details_list.append(detail)
+    # Simplified LoRA handling: args.lora is now expected to be a list of file paths
+    lora_file_paths = args.lora if args.lora else []
 
     print(f"Attempting to initialize pipeline with model: {args.model}")
-    if lora_details_list:
-        print("LoRA details to load:")
-        for ld in lora_details_list:
-            print(f"  Path: {ld.get('path')}, Weight Name: {ld.get('weight_name')}")
+    if lora_file_paths:
+        print("LoRA files to load:")
+        for lora_file in lora_file_paths:
+            print(f"  - {lora_file}")
     
     # --- 1. Create Output Directory ---
     random_suffix = uuid.uuid4().hex[:8]
@@ -133,9 +129,13 @@ def main():
     print("\n--- Initializing Text-to-Image Pipeline ---")
     txt2img_pipe = initialize_diffusion_pipeline(
         model_id_or_path=args.model,
-        lora_details=lora_details_list, # Pass parsed LoRA details
+        lora_file_paths=lora_file_paths,
         device_str=device,
-        pipeline_type="txt2img"
+        pipeline_type="txt2img",
+        sdxl_lightning_unet_repo_id=args.sdxl_lightning_unet_repo_id,
+        sdxl_lightning_unet_ckpt=args.sdxl_lightning_unet_ckpt,
+        sdxl_variant=args.sdxl_variant,
+        scheduler_timestep_spacing=args.scheduler_timestep_spacing
     )
 
     if not txt2img_pipe:
@@ -202,9 +202,13 @@ def main():
         print("\n--- Initializing Image-to-Image Pipeline for Animation ---")
         img2img_pipe = initialize_diffusion_pipeline(
             model_id_or_path=args.model,
-            lora_details=lora_details_list, # Re-pass LoRA details
+            lora_file_paths=lora_file_paths,
             device_str=device,
-            pipeline_type="img2img"
+            pipeline_type="img2img",
+            sdxl_lightning_unet_repo_id=args.sdxl_lightning_unet_repo_id,
+            sdxl_lightning_unet_ckpt=args.sdxl_lightning_unet_ckpt,
+            sdxl_variant=args.sdxl_variant,
+            scheduler_timestep_spacing=args.scheduler_timestep_spacing
         )
 
         if not img2img_pipe:
