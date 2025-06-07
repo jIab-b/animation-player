@@ -145,6 +145,7 @@ def main():
 
     print(f"\n--- Generating Base Image ({args.width}x{args.height}) ---")
     print(f"Prompt: {args.prompt}")
+    txt2img_pipe.enable_sequential_cpu_offload()
     try:
         with torch.inference_mode():
             image = txt2img_pipe(
@@ -210,7 +211,7 @@ def main():
             sdxl_variant=args.sdxl_variant,
             scheduler_timestep_spacing=args.scheduler_timestep_spacing
         )
-
+        img2img_pipe.enable_sequential_cpu_offload()
         if not img2img_pipe:
             print("Failed to initialize Image-to-Image pipeline. Exiting.")
             shutil.rmtree(output_folder_name)
