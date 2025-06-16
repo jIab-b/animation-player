@@ -5,19 +5,15 @@ from diffusers import (
     StableDiffusionImg2ImgPipeline,
     StableDiffusionXLPipeline,
     StableDiffusionXLImg2ImgPipeline,
-    UNet2DConditionModel,
     EulerDiscreteScheduler
 )
-from huggingface_hub import hf_hub_download
-from safetensors.torch import load_file
+# UNet2DConditionModel, hf_hub_download, load_file removed as they were for SDXL-Lightning custom UNet
 
 def initialize_diffusion_pipeline(
     model_id_or_path,
     lora_file_paths=None,
     device_str="cuda",
     pipeline_type="img2img",
-    sdxl_lightning_unet_repo_id=None,
-    sdxl_lightning_unet_ckpt=None,
     sdxl_variant=None, # e.g., "fp16"
     scheduler_timestep_spacing=None # e.g., "trailing"
 ):
@@ -29,9 +25,8 @@ def initialize_diffusion_pipeline(
         lora_file_paths (list of str, optional): List of file paths to LoRA (.safetensors) files.
         device_str (str): "cuda" or "cpu".
         pipeline_type (str): "txt2img" or "img2img".
-        sdxl_lightning_unet_repo_id (str, optional): Repo ID for SDXL-Lightning UNet.
-        sdxl_lightning_unet_ckpt (str, optional): Checkpoint filename for SDXL-Lightning UNet.
         sdxl_variant (str, optional): Variant for SDXL pipeline (e.g., "fp16").
+                                      Applicable if an SDXL model is detected.
         scheduler_timestep_spacing (str, optional): Timestep spacing for EulerDiscreteScheduler.
 
     Returns:
@@ -39,65 +34,82 @@ def initialize_diffusion_pipeline(
     """
     torch_dtype = torch.float16 if device_str == "cuda" else torch.float32
     pipe = None
-    is_sdxl_lightning = sdxl_lightning_unet_repo_id and sdxl_lightning_unet_ckpt
+    is_sdxl_model = "xl" in model_id_or_path.lower() # Basic check for SDXL
 
-    if is_sdxl_lightning:
-        print(f"Attempting to load SDXL-Lightning model: {model_id_or_path} with UNet from {sdxl_lightning_unet_repo_id}/{sdxl_lightning_unet_ckpt}")
-        sdxl_pipeline_class = StableDiffusionXLImg2ImgPipeline if pipeline_type == "img2img" else StableDiffusionXLPipeline
+    print(f"Attempting to load model: {model_id_or_path} as {pipeline_type} pipeline.")
+
+    if is_sdxl_model:
+        print(f"Model '{model_id_or_path}' detected as an SDXL model.")
+        PipelineClass = StableDiffusionXLImg2ImgPipeline if pipeline_type == "img2img" else StableDiffusionXLPipeline
+        current_sdxl_variant = sdxl_variant
+        if not current_sdxl_variant and device_str == "cuda":
+            print("Defaulting SDXL variant to 'fp16' for CUDA device as none was specified.")
+            current_sdxl_variant = "fp16"
         
         try:
-            print(f"Loading UNet config from base: {model_id_or_path}")
-            unet = UNet2DConditionModel.from_config(model_id_or_path, subfolder="unet").to(device_str, torch_dtype)
-            print(f"Downloading and loading UNet checkpoint: {sdxl_lightning_unet_repo_id}/{sdxl_lightning_unet_ckpt}")
-            unet_checkpoint_path = hf_hub_download(sdxl_lightning_unet_repo_id, sdxl_lightning_unet_ckpt)
-            unet.load_state_dict(load_file(unet_checkpoint_path, device=device_str))
-            
-            print(f"Loading SDXL pipeline: {model_id_or_path} with custom UNet.")
-            pipe = sdxl_pipeline_class.from_pretrained(
-                model_id_or_path,
-                unet=unet,
-                torch_dtype=torch_dtype,
-                variant=sdxl_variant or ("fp16" if device_str == "cuda" else None), # Default variant for SDXL
-                safety_checker=None
-            )
-            print("Successfully loaded SDXL-Lightning pipeline.")
-        except Exception as e:
-            print(f"Error loading SDXL-Lightning model: {e}")
-            return None
-        # Default scheduler spacing for SDXL Lightning
-        if scheduler_timestep_spacing is None:
-            scheduler_timestep_spacing = "trailing"
-
-    else:
-        print(f"Attempting to load standard Stable Diffusion model: {model_id_or_path} as {pipeline_type} pipeline.")
-        sd_pipeline_class = StableDiffusionImg2ImgPipeline if pipeline_type == "img2img" else StableDiffusionPipeline
-        try:
-            pipe = sd_pipeline_class.from_pretrained(
+            pipe = PipelineClass.from_pretrained(
                 model_id_or_path,
                 torch_dtype=torch_dtype,
+                variant=current_sdxl_variant,
                 safety_checker=None
             )
-            print(f"Successfully loaded model '{model_id_or_path}' using from_pretrained.")
+            print(f"Successfully loaded SDXL model '{model_id_or_path}' using {PipelineClass.__name__}.")
         except (OSError, IOError) as e:
-            print(f"Could not load model '{model_id_or_path}' directly with from_pretrained: {e}")
+            print(f"Could not load SDXL model '{model_id_or_path}' directly with from_pretrained: {e}")
             if os.path.isdir(model_id_or_path):
-                print(f"'{model_id_or_path}' is a directory. Attempting to load from local directory.")
+                print(f"'{model_id_or_path}' is a directory. Attempting to load SDXL from local directory.")
                 try:
-                    pipe = sd_pipeline_class.from_pretrained(
+                    pipe = PipelineClass.from_pretrained(
+                        model_id_or_path,
+                        local_files_only=True,
+                        torch_dtype=torch_dtype,
+                        variant=current_sdxl_variant,
+                        safety_checker=None
+                    )
+                    print(f"Successfully loaded SDXL model from local directory: {model_id_or_path}")
+                except Exception as e_local:
+                    print(f"Failed to load SDXL model from local directory '{model_id_or_path}': {e_local}")
+                    return None
+            else:
+                print(f"'{model_id_or_path}' is not a recognized Hugging Face ID or local directory for SDXL. Model loading failed.")
+                return None
+        except Exception as e_general:
+            print(f"An unexpected error occurred while loading SDXL model '{model_id_or_path}': {e_general}")
+            return None
+    else:
+        print(f"Model '{model_id_or_path}' detected as a non-SDXL (standard Stable Diffusion) model.")
+        PipelineClass = StableDiffusionImg2ImgPipeline if pipeline_type == "img2img" else StableDiffusionPipeline
+        if sdxl_variant:
+            print(f"Warning: sdxl_variant ('{sdxl_variant}') provided for non-SDXL model '{model_id_or_path}'. It will be ignored.")
+
+        try:
+            pipe = PipelineClass.from_pretrained(
+                model_id_or_path,
+                torch_dtype=torch_dtype,
+                safety_checker=None
+                # `variant` is not typically used for non-SDXL standard pipelines in the same way
+            )
+            print(f"Successfully loaded standard model '{model_id_or_path}' using {PipelineClass.__name__}.")
+        except (OSError, IOError) as e:
+            print(f"Could not load standard model '{model_id_or_path}' directly with from_pretrained: {e}")
+            if os.path.isdir(model_id_or_path):
+                print(f"'{model_id_or_path}' is a directory. Attempting to load standard model from local directory.")
+                try:
+                    pipe = PipelineClass.from_pretrained(
                         model_id_or_path,
                         local_files_only=True,
                         torch_dtype=torch_dtype,
                         safety_checker=None
                     )
-                    print(f"Successfully loaded model from local directory: {model_id_or_path}")
+                    print(f"Successfully loaded standard model from local directory: {model_id_or_path}")
                 except Exception as e_local:
-                    print(f"Failed to load model from local directory '{model_id_or_path}': {e_local}")
+                    print(f"Failed to load standard model from local directory '{model_id_or_path}': {e_local}")
                     return None
             else:
-                print(f"'{model_id_or_path}' is not a recognized Hugging Face ID or local directory. Model loading failed.")
+                print(f"'{model_id_or_path}' is not a recognized Hugging Face ID or local directory for standard SD. Model loading failed.")
                 return None
         except Exception as e_general:
-            print(f"An unexpected error occurred while loading model '{model_id_or_path}': {e_general}")
+            print(f"An unexpected error occurred while loading standard model '{model_id_or_path}': {e_general}")
             return None
 
     if not pipe:
@@ -195,31 +207,42 @@ if __name__ == '__main__':
     # else:
     #     print("Test 4 Failed.")
 
-    # Test 5: SDXL Lightning 4-step
-    print("\n--- Test 5: SDXL Lightning 4-step (txt2img) ---")
-    # Base SDXL model ID
+    # Test 5: SDXL Base (as an example of an SDXL model)
+    print("\n--- Test 5: SDXL Base (txt2img) ---")
     sdxl_base_model_id = "stabilityai/stable-diffusion-xl-base-1.0"
-    # SDXL Lightning UNet details
-    unet_repo = "ByteDance/SDXL-Lightning"
-    unet_ckpt = "sdxl_lightning_4step_unet.safetensors"
-
     pipe5 = initialize_diffusion_pipeline(
         model_id_or_path=sdxl_base_model_id,
         pipeline_type="txt2img",
-        sdxl_lightning_unet_repo_id=unet_repo,
-        sdxl_lightning_unet_ckpt=unet_ckpt,
-        sdxl_variant="fp16", # Common for SDXL
-        # scheduler_timestep_spacing="trailing" # Will default to trailing for SDXL-Lightning
+        sdxl_variant="fp16", # Explicitly pass for SDXL
+        scheduler_timestep_spacing="trailing" # Example of setting scheduler
     )
     if pipe5:
-        print("Test 5 Succeeded: SDXL Lightning Pipeline object created.")
-        # Example generation (optional, can be slow)
+        print("Test 5 Succeeded: SDXL Base Pipeline object created.")
+        # Example generation (optional, can be slow and requires significant VRAM)
         # prompt_test_sdxl = "A majestic lion in a futuristic city, detailed, cinematic"
-        # with torch.inference_mode():
-        #     image_sdxl = pipe5(prompt=prompt_test_sdxl, num_inference_steps=4, guidance_scale=0).images[0] # guidance_scale=0 for lightning
-        # image_sdxl.save("test_sdxl_lightning.png")
-        # print("Test SDXL image saved as test_sdxl_lightning.png")
+        # try:
+        #     with torch.inference_mode():
+        #         image_sdxl = pipe5(prompt=prompt_test_sdxl, num_inference_steps=20, guidance_scale=7.5, width=1024, height=1024).images[0]
+        #     image_sdxl.save("test_sdxl_base.png")
+        #     print("Test SDXL image saved as test_sdxl_base.png")
+        # except Exception as e_gen:
+        #     print(f"Could not generate test image for SDXL base: {e_gen}")
     else:
         print("Test 5 Failed.")
+    
+    # Test for scheduler spacing on a non-SDXL model
+    print("\n--- Test 6: SD 1.5 with custom scheduler spacing ---")
+    pipe6 = initialize_diffusion_pipeline(
+        "runwayml/stable-diffusion-v1-5",
+        pipeline_type="txt2img",
+        scheduler_timestep_spacing="leading"
+    )
+    if pipe6 and hasattr(pipe6.scheduler.config, 'timestep_spacing') and pipe6.scheduler.config.timestep_spacing == "leading":
+        print("Test 6 Succeeded: SD 1.5 Pipeline with 'leading' timestep_spacing created.")
+    elif pipe6:
+        print(f"Test 6 Failed: Scheduler spacing not 'leading'. Got: {getattr(pipe6.scheduler.config, 'timestep_spacing', 'N/A')}")
+    else:
+        print("Test 6 Failed: Pipeline not created.")
+
 
     print("\nPipeline.py testing finished.")

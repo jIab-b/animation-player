@@ -73,29 +73,17 @@ def main():
         default=10,
         help="Frames per second for the output animation player. Default is 10."
     )
-    # SDXL-Lightning specific arguments
-    parser.add_argument(
-        "--sdxl_lightning_unet_repo_id",
-        type=str,
-        default=None,
-        help="Hugging Face Repo ID for the SDXL-Lightning UNet (e.g., 'ByteDance/SDXL-Lightning')."
-    )
-    parser.add_argument(
-        "--sdxl_lightning_unet_ckpt",
-        type=str,
-        default=None,
-        help="Checkpoint filename for the SDXL-Lightning UNet (e.g., 'sdxl_lightning_4step_unet.safetensors')."
-    )
+    # SDXL specific arguments (no longer Lightning specific)
     parser.add_argument(
         "--sdxl_variant",
         type=str,
-        default=None, # Will default to fp16 in pipeline.py if on cuda and SDXL
-        help="Variant for SDXL pipeline (e.g., 'fp16')."
+        default=None,
+        help="Variant for SDXL pipeline (e.g., 'fp16'). Applicable if an SDXL model is used."
     )
     parser.add_argument(
         "--scheduler_timestep_spacing",
         type=str,
-        default=None, # Will default to 'trailing' in pipeline.py for SDXL-Lightning
+        default=None,
         help="Scheduler timestep spacing (e.g., 'trailing', 'leading', 'linspace')."
     )
 
@@ -132,8 +120,6 @@ def main():
         lora_file_paths=lora_file_paths,
         device_str=device,
         pipeline_type="txt2img",
-        sdxl_lightning_unet_repo_id=args.sdxl_lightning_unet_repo_id,
-        sdxl_lightning_unet_ckpt=args.sdxl_lightning_unet_ckpt,
         sdxl_variant=args.sdxl_variant,
         scheduler_timestep_spacing=args.scheduler_timestep_spacing
     )
@@ -206,8 +192,6 @@ def main():
             lora_file_paths=lora_file_paths,
             device_str=device,
             pipeline_type="img2img",
-            sdxl_lightning_unet_repo_id=args.sdxl_lightning_unet_repo_id,
-            sdxl_lightning_unet_ckpt=args.sdxl_lightning_unet_ckpt,
             sdxl_variant=args.sdxl_variant,
             scheduler_timestep_spacing=args.scheduler_timestep_spacing
         )
