@@ -94,11 +94,11 @@ def main():
     # Simplified LoRA handling: args.lora is now expected to be a list of file paths
     lora_file_paths = args.lora if args.lora else []
 
-    print(f"Attempting to initialize pipeline with model: {args.model}")
-    if lora_file_paths:
-        print("LoRA files to load:")
-        for lora_file in lora_file_paths:
-            print(f"  - {lora_file}")
+    # print(f"Attempting to initialize pipeline with model: {args.model}")
+    # if lora_file_paths:
+    #     print("LoRA files to load:")
+    #     for lora_file in lora_file_paths:
+    #         print(f"  - {lora_file}")
     
     # --- 1. Create Output Directory ---
     random_suffix = uuid.uuid4().hex[:8]
